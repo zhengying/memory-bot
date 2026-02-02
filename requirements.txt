@@ -1,0 +1,7 @@
+# Production Dependencies
+openai>=1.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+tiktoken>=0.5.0
