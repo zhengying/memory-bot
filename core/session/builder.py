@@ -5,6 +5,7 @@ from typing import List, Optional
 from .models import ContextConfig, BuiltContext, Session
 from core.llm import LLMProvider, Message
 from core.memory import MemoryDatabase, SearchQuery, SearchResult
+from core.utils import count_messages
 
 
 class ContextBuilder:
@@ -80,15 +81,16 @@ class ContextBuilder:
         # Add message history
         messages.extend(session.messages)
 
-        # Count tokens
-        token_count: int = sum(len(msg.content) for msg in messages)
+        # Count tokens accurately using tiktoken
+        token_count: int = count_messages(messages)
 
         # Check if exceeds budget
         truncated = token_count > self.config.max_tokens
 
         if truncated:
-            # Truncate messages (simple strategy: keep system, drop history)
-            messages = self._truncate_messages(messages)
+            # Truncate messages using token-based strategy
+            messages, token_count = self._truncate_to_budget(messages)
+            truncated = True
 
         return BuiltContext(
             messages=messages,
@@ -114,8 +116,64 @@ class ContextBuilder:
             lines.append("")
         return "\n".join(lines)
 
+    def _truncate_to_budget(self, messages: List[Message]) -> tuple[List[Message], int]:
+        """Truncate messages to fit within token budget
+
+        Uses a sliding window strategy:
+        1. Always keep system messages (first 1-2 messages)
+        2. Keep as many recent messages as possible within budget
+        3. Remove middle/old messages if necessary
+
+        Args:
+            messages: Messages to truncate
+
+        Returns:
+            Tuple of (truncated messages, token count)
+        """
+        if not messages:
+            return [], 0
+        
+        # Separate system messages from conversation
+        system_messages = []
+        conversation = []
+        
+        for i, msg in enumerate(messages):
+            if msg.role == "system" and i < 2:  # Keep first 1-2 system messages
+                system_messages.append(msg)
+            else:
+                conversation.append(msg)
+        
+        # Calculate system message tokens
+        system_tokens = count_messages(system_messages)
+        available_budget = self.config.max_tokens - system_tokens
+        
+        # If no budget left, just return system messages
+        if available_budget <= 0:
+            return system_messages, system_tokens
+        
+        # Try to fit as many recent conversation messages as possible
+        # Start from the most recent and work backwards
+        kept_conversation = []
+        current_tokens = 0
+        
+        for msg in reversed(conversation):
+            msg_tokens = count_messages([msg])
+            
+            if current_tokens + msg_tokens <= available_budget:
+                kept_conversation.insert(0, msg)  # Insert at beginning to maintain order
+                current_tokens += msg_tokens
+            else:
+                # Can't fit this message, stop here
+                break
+        
+        # Combine system messages with kept conversation
+        truncated = system_messages + kept_conversation
+        total_tokens = count_messages(truncated)
+        
+        return truncated, total_tokens
+
     def _truncate_messages(self, messages: List[Message]) -> List[Message]:
-        """Truncate messages to fit budget
+        """Legacy truncate method for backward compatibility
 
         Args:
             messages: Messages to truncate
@@ -123,12 +181,6 @@ class ContextBuilder:
         Returns:
             Truncated messages
         """
-        # Simple strategy: keep system messages, truncate history
-        # Real implementation would use sliding window
-
-        # Keep first 2 messages (usually system prompts)
-        # Keep last 5 messages (recent conversation)
-        if len(messages) > 7:
-            return messages[:2] + messages[-5:]
-
-        return messages
+        # Delegate to the new token-based method
+        truncated, _ = self._truncate_to_budget(messages)
+        return truncated

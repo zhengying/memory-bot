@@ -48,12 +48,17 @@ class TestSession:
         assert last_3[0].content == "Message 7"
 
     def test_total_tokens(self):
-        """Test total token count"""
+        """Test total token count with tiktoken"""
         session = Session(id="test")
+        from core.utils import count_messages
 
         session.add_message(Message(role="user", content="Hello world"))
 
-        assert session.total_tokens() == len("Hello world")
+        # Should use tiktoken for accurate counting (not character length)
+        expected_tokens = count_messages(session.messages)
+        assert session.total_tokens() == expected_tokens
+        # "Hello world" is 2 tokens, plus message overhead
+        assert session.total_tokens() < len("Hello world") * 2  # Much less than char count
 
 
 class TestContextConfig:

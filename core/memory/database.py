@@ -141,27 +141,33 @@ class MemoryDatabase:
 
         cursor = self.conn.cursor()
 
-        # Build query - FTS5 has issues with parameterized queries for MATCH
-        # So we use string formatting with proper escaping
-        # Also need to escape FTS5 special characters like "?"
-        search_term = query.query.replace("'", "''").replace("?", "")
-        limit = int(query.limit)  # Ensure it's an integer
+        # Validate and sanitize inputs to prevent SQL injection
+        search_term = self._sanitize_fts_query(query.query)
+        limit = max(1, min(int(query.limit), 100))  # Clamp limit between 1-100
         
-        sql = f"""
-            SELECT m.*, bm25(memories_fts) as rank_score
-            FROM memories_fts
-            JOIN memories m ON m.id = memories_fts.rowid
-            WHERE memories_fts MATCH '{search_term}'
-        """
+        # FTS5 MATCH doesn't support parameterization, so we use a hybrid approach:
+        # 1. Sanitize the search term thoroughly
+        # 2. Use parameterization for other fields (source_file)
+        # 3. Validate limit is an integer
         
         if query.source_file:
-            # Escape single quotes in source_file
-            source_file_escaped = query.source_file.replace("'", "''")
-            sql += f" AND m.source_file = '{source_file_escaped}'"
-        
-        sql += f" ORDER BY rank_score LIMIT {limit}"
-
-        cursor.execute(sql)
+            sql = """
+                SELECT m.*, bm25(memories_fts) as rank_score
+                FROM memories_fts
+                JOIN memories m ON m.id = memories_fts.rowid
+                WHERE memories_fts MATCH ? AND m.source_file = ?
+                ORDER BY rank_score LIMIT ?
+            """
+            cursor.execute(sql, (search_term, query.source_file, limit))
+        else:
+            sql = """
+                SELECT m.*, bm25(memories_fts) as rank_score
+                FROM memories_fts
+                JOIN memories m ON m.id = memories_fts.rowid
+                WHERE memories_fts MATCH ?
+                ORDER BY rank_score LIMIT ?
+            """
+            cursor.execute(sql, (search_term, limit))
         rows = cursor.fetchall()
 
         import json
@@ -225,6 +231,40 @@ class MemoryDatabase:
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM memories")
         self.conn.commit()
+
+    def _sanitize_fts_query(self, query: str) -> str:
+        """Sanitize FTS5 query to prevent injection attacks and syntax errors
+        
+        FTS5 has special characters that cause syntax errors:
+        - ? - wildcard/placeholder (causes syntax error)
+        - " - phrase delimiter (must be doubled)
+        - * - prefix operator
+        - ^ - NEAR operator
+        - AND, OR, NOT - boolean operators
+        
+        Args:
+            query: Raw user query
+            
+        Returns:
+            Sanitized query safe for FTS5
+        """
+        if not query:
+            return ""
+        
+        # Remove null bytes and control characters
+        query = ''.join(char for char in query if ord(char) >= 32 or char in '\t\n\r')
+        
+        # Limit length to prevent DoS
+        query = query[:200]
+        
+        # Remove FTS5 special characters that cause syntax errors
+        # ? is a special character in FTS5 that causes "syntax error near ?"
+        query = query.replace('?', '')
+        
+        # Escape double quotes by doubling them (FTS5 escape rule)
+        query = query.replace('"', '""')
+        
+        return query
 
     def count(self) -> int:
         """Count total memories

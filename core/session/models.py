@@ -44,13 +44,21 @@ class Session:
         """
         return self.messages[-n:] if n > 0 else []
 
-    def total_tokens(self) -> int:
-        """Estimate total tokens in session
+    def total_tokens(self, model: str = "gpt-4") -> int:
+        """Count total tokens in session using tiktoken
+
+        Args:
+            model: Model name for token counting
 
         Returns:
-            Token count estimate (character length)
+            Accurate token count
         """
-        return sum(len(msg.content) for msg in self.messages)
+        try:
+            from core.utils import count_messages
+            return count_messages(self.messages, model)
+        except ImportError:
+            # Fallback to character-based estimate
+            return sum(len(msg.content) for msg in self.messages)
 
 
 @dataclass
