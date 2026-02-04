@@ -1,0 +1,67 @@
+# Memory-Bot 渠道配置
+# OpenClaw 风格配置 - 纯 YAML，无需代码
+
+# 服务配置
+server:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+
+# 渠道配置
+channels:
+  # WhatsApp 渠道
+  whatsapp:
+    enabled: true
+    provider: "twilio"  # 可选: twilio, whatsapp-business
+    
+    # Twilio 配置
+    twilio:
+      account_sid: "${TWILIO_ACCOUNT_SID}"
+      auth_token: "${TWILIO_AUTH_TOKEN}"
+      phone_number: "${TWILIO_PHONE_NUMBER}"
+    
+    # Webhook 配置
+    webhook:
+      path: "/webhook/whatsapp"
+      secret: "${WEBHOOK_SECRET}"
+      public_url: "${PUBLIC_URL}"
+  
+  # Discord 渠道（可选）
+  discord:
+    enabled: false
+    token: "${DISCORD_TOKEN}"
+    command_prefix: "!"
+  
+  # Telegram 渠道（可选）
+  telegram:
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+
+# AI 配置
+ai:
+  provider: "openai"  # 可选: openai, anthropic, mock
+  
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4"
+    temperature: 0.7
+  
+  # Mock 模式（用于测试，无需 API Key）
+  mock:
+    enabled: false
+    responses:
+      - "这是一个模拟回复。"
+      - "我正在测试中。"
+
+# 记忆配置
+memory:
+  enabled: true
+  storage: "sqlite"  # 可选: sqlite, memory
+  database_path: "./data/memory.db"
+  max_history: 100
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/memory-bot.log"
